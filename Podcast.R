@@ -10,7 +10,6 @@ library(performance)
 
 #EXPLORATORY DATA ANALYSIS
 
-str(train)
 summary(train)
 sum(is.na(train$Listening_Time_minutes))
 sum(is.na(train))
