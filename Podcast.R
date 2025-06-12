@@ -5,6 +5,7 @@ library(corrplot)
 library(caret)
 library(car)
 library(performance)
+library(SHAPforxgboost)
 
 ################################################################################
 
@@ -242,9 +243,27 @@ RMSE(predict(xgb_tuned, newdata = df_impute_v3_test),
      df_impute_v3_test$Listening_Time_minutes)
 
 
-ggplot(varImp(xgb_tuned), top = 10)
+ggplot(varImp(xgb_tuned), top = 5)
 
 varImp(xgb_tuned)
+
+#Extract the final model
+
+xgb_booster <- xgb_tuned$finalModel
+
+#Convert to one hot encode
+
+x_onehot <- model.matrix(~ . -1, data = df_impute_v3_train)
+x_mat <- x_onehot[,xgb_booster$feature_names]
+#identical(colnames(x_mat), xgb_booster$feature_names)
+
+#Calculate SHAP values
+
+shap_values <- shap.values(xgb_model = xgb_booster, 
+                           X_train = x_mat)
+
+head(shap_values$shap_score)
+
 
 ################################################################################
 
