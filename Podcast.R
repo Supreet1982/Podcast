@@ -259,11 +259,53 @@ x_mat <- x_onehot[,xgb_booster$feature_names]
 
 #Calculate SHAP values
 
-shap_values <- shap.values(xgb_model = xgb_booster, 
+shap_values <- shap.values(xgb_model = xgb_booster,
                            X_train = x_mat)
 
-head(shap_values$shap_score)
+#Inspect SHAP values
 
+head(shap_values$shap_score)
+str(shap_values$shap_score)
+#Compute feature importance
+
+shap_contrib <- shap_values$shap_score
+
+shap_imp <- data.frame(
+  Feature = colnames(shap_contrib),
+  Mean_abs_SHAP = colMeans(abs(as.matrix(shap_contrib)))
+)
+
+#Reshaping for plotting
+
+shap_long <- shap.prep(shap_contrib = shap_contrib, X_train = x_mat)
+
+#Plot SHAP summary
+
+top5_vars <- shap_long %>%
+  group_by(variable) %>%
+  summarize(mean_abs_shap = mean(abs(mean_value), na.rm = TRUE)) %>%
+  arrange(desc(mean_abs_shap)) %>%
+  slice_head(n=5) %>%
+  pull(variable)
+
+#Sample shap_long
+
+shap_long_small <- shap_long %>% sample_n(10000)
+
+for (var in top5_vars) {
+  png(filename = paste0("shap_dependence_", var, ".png"), width = 800, height = 600)
+  print(
+    shap.plot.dependence(
+      data_long = shap_long_small,
+      x = var
+    )
+  )
+  dev.off()
+}
+
+#Dependence plot
+
+shap.plot.dependence(data_long = shap_long_small, x = "Episode_Number")
 
 ################################################################################
 
