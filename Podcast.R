@@ -6,6 +6,7 @@ library(caret)
 library(car)
 library(performance)
 library(SHAPforxgboost)
+library(pdp)
 
 ################################################################################
 
@@ -242,10 +243,27 @@ xgb_tuned <- train(Listening_Time_minutes ~ ., data = df_impute_v3_train,
 RMSE(predict(xgb_tuned, newdata = df_impute_v3_test),
      df_impute_v3_test$Listening_Time_minutes)
 
-
 ggplot(varImp(xgb_tuned), top = 5)
 
 varImp(xgb_tuned)
+
+partial(xgb_tuned, train = df_impute_v3_train, pred.var = 'Episode_Length_minutes',
+        plot = TRUE)
+
+partial(xgb_tuned, train = df_impute_v3_train, pred.var = 'Number_of_Ads',
+        plot = TRUE)
+
+partial(xgb_tuned, train = df_impute_v3_train, pred.var = 'Host_Popularity_percentage',
+        plot = TRUE)
+
+partial(xgb_tuned, train = df_impute_v3_train, pred.var = 'Genre',
+        plot = TRUE)
+
+partial(xgb_tuned, train = df_impute_v3_train, pred.var = 'Publication_Day',
+        plot = TRUE)
+
+partial(xgb_tuned, train = df_impute_v3_train, pred.var = 'Episode_Number',
+        plot = TRUE)
 
 #Extract the final model
 
@@ -269,11 +287,6 @@ str(shap_values$shap_score)
 #Compute feature importance
 
 shap_contrib <- shap_values$shap_score
-
-shap_imp <- data.frame(
-  Feature = colnames(shap_contrib),
-  Mean_abs_SHAP = colMeans(abs(as.matrix(shap_contrib)))
-)
 
 #Reshaping for plotting
 
@@ -305,11 +318,64 @@ for (var in top5_vars) {
 
 #Dependence plot
 
-shap.plot.dependence(data_long = shap_long_small, x = "Episode_Number")
+shap.plot.dependence(data_long = shap_long_small, x = "Host_Popularity_percentage",
+                     color_feature = 'Episode_Number')
+
+#SHAP values for Test data
+
+x_onehot_test <- model.matrix(~ . -1, data = df_impute_v3_test)
+x_mat_test <- x_onehot_test[,xgb_booster$feature_names]
+
+#SHAP values for test data
+
+shap_values_test <- shap.values(xgb_booster, x_mat_test)
+
+#Reshaping for plotting
+
+shap_long_test <- shap.prep(shap_contrib = shap_values_test$shap_score,
+                            X_train = x_mat_test)
+
+#Top 5 variables
+
+top5_vars_test <- shap_long_test %>%
+  group_by(variable) %>%
+  summarize(mean_abs_shap = mean(abs(mean_value), na.rm = TRUE)) %>%
+  arrange(desc(mean_abs_shap)) %>%
+  slice_head(n = 5) %>%
+  pull(variable)
+
+#Sample shap_long_test
+
+shap_long_small_test <- shap_long_test %>% sample_n(10000)
+
+#Dependence plot
+
+shap.plot.dependence(data_long = shap_long_small_test, 
+                     x = 'Number_of_Ads')
+
+#Residual diagnosis
+
+xgb_y_pred <- predict(xgb_tuned, newdata = df_impute_v3_test)
+
+xgb_residuals <- df_impute_v3_test$Listening_Time_minutes - xgb_y_pred
+
+plot(xgb_y_pred, xgb_residuals, xlab = 'Predicted Value', ylab = 'Residuals',
+     main = 'Residual vs Fitted')
+abline(h = 0, col = 'red')
+
+qqnorm(xgb_residuals)
+qqline(xgb_residuals, col = 'red')
+
+hist(xgb_residuals, breaks = 30, main = 'Histogram of Residuals',
+     xlab = 'Residuals')
+
+ggplot(data.frame(xgb_y_pred, xgb_residuals), aes(x=xgb_y_pred,
+                                                  y=xgb_residuals)) +
+  geom_point(alpha=0.6) +
+  geom_hline(yintercept = 0, color = 'red') +
+  labs(title = 'Residual vs Fitted', x = 'Fitted', y = 'Residuals')
 
 ################################################################################
-
-
 
 
 
