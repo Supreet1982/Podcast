@@ -7,6 +7,8 @@ library(car)
 library(performance)
 library(SHAPforxgboost)
 library(pdp)
+library(moments)
+library(glmnet)
 
 ################################################################################
 
@@ -173,6 +175,7 @@ df_impute_v3 %>%
 table(df_impute_v3$Genre)
 
 ################################################################################
+################################################################################
 
 #MODEL CONSTRUCTION
 
@@ -215,6 +218,7 @@ mean(df_impute_v3_test$Listening_Time_minutes)
 lm_full <- lm(Listening_Time_minutes ~ ., data = df_impute_v3_train)
 
 summary(lm_full)
+plot(lm_full)
 
 #MODEL VALIDATION
 
@@ -224,6 +228,138 @@ RMSE(predict(lm_full, newdata = df_impute_v3_test),
 vif(lm_full)
 check_collinearity(lm_full)
 
+#Binarize factor variables
+
+binarizer <- dummyVars(~ Genre + Publication_Day + Publication_Time + 
+                         Episode_Sentiment, data = df_impute_v3, fullRank = TRUE)
+
+binarized_vars <- data.frame(predict(binarizer, newdata = df_impute_v3))
+
+head(binarized_vars)
+
+df_impute_v3_bin <- cbind(df_impute_v3, binarized_vars)
+head(df_impute_v3_bin)
+
+df_impute_v3_bin$Genre <- NULL
+df_impute_v3_bin$Publication_Day <- NULL
+df_impute_v3_bin$Publication_Time <- NULL
+df_impute_v3_bin$Episode_Sentiment <- NULL
+
+df_impute_v3_bin %>%
+  ggplot(aes((Listening_Time_minutes + 1)^(2/3))) +
+  geom_histogram()
+
+#Using Box-Cox to transform target variable
+
+bc <- boxcox(lm(Listening_Time_minutes + 1~., data = df_impute_v3_bin))
+
+lambda <- bc$x[which.max(bc$y)]
+
+#Convert target variable
+
+df_impute_v3_bin$Listening_Time_minutes_bc <- 
+  ((df_impute_v3_bin$Listening_Time_minutes + 1)^lambda - 1) / lambda
+
+#Train test split
+
+df_impute_v3_bin_train <- df_impute_v3_bin[partition,]
+df_impute_v3_bin_test <- df_impute_v3_bin[-partition,]
+
+#Ful model with binarized variables
+
+lm_full_bin <- lm(Listening_Time_minutes ~ . - Listening_Time_minutes_bc,
+                  data = df_impute_v3_bin_train)
+
+summary(lm_full_bin)
+
+lm_full_bin_bc <- lm(Listening_Time_minutes_bc ~ . - Listening_Time_minutes,
+                     data = df_impute_v3_bin_train)
+
+pred_bc <- predict(lm_full_bin_bc)
+
+pred_original <- ((lambda * pred_bc + 1)^(1/lambda)) - 1
+
+RMSE(pred_original, df_impute_v3_bin_train$Listening_Time_minutes)
+
+#Stepwise Regression
+
+model_backward_AIC <- stepAIC(lm_full_bin)
+
+lm_null <- lm(Listening_Time_minutes ~ 1, data = df_impute_v3_bin_train)
+
+model_forward_BIC <- stepAIC(lm_null, direction = 'forward',
+                             scope = list(upper=lm_full_bin,
+                                          lower=lm_null),
+                             k=log(nrow(df_impute_v3_bin_train)))
+
+model_forward_BIC$coefficients
+model_backward_AIC$coefficients
+
+#MODEL VALIDATION
+
+RMSE(predict(lm_null, newdata = df_impute_v3_bin_test),
+     df_impute_v3_bin_test$Listening_Time_minutes)
+
+RMSE(predict(model_backward_AIC, newdata = df_impute_v3_bin_test),
+     df_impute_v3_bin_test$Listening_Time_minutes)
+
+RMSE(predict(model_forward_BIC, newdata = df_impute_v3_bin_test),
+     df_impute_v3_bin_test$Listening_Time_minutes)
+
+RMSE(predict(lm_full_bin, newdata = df_impute_v3_bin_test),
+     df_impute_v3_bin_test$Listening_Time_minutes)
+
+#Regularization
+
+Reg_train <- model.matrix(Listening_Time_minutes ~ . - Listening_Time_minutes_bc,
+                          data = df_impute_v3_bin_train)
+
+head(Reg_train)
+
+m_lambda <- glmnet(x = Reg_train, y = df_impute_v3_bin_train$Listening_Time_minutes,
+                   family = 'gaussian', lambda = c(0, 10, 100, 500, 1000),
+                   alpha = 0.5)
+
+m_lambda$a0
+m_lambda$beta
+coef(m_lambda)
+
+m_ridge <- glmnet(x = Reg_train, y = df_impute_v3_bin_train$Listening_Time_minutes,
+                  family = 'gaussian', lambda = 10, alpha = 0)
+
+m_lasso <- glmnet(x = Reg_train, y = df_impute_v3_bin_train$Listening_Time_minutes,
+                  family = 'gaussian', lambda = 10, alpha = 1)
+
+coef(m_ridge)
+coef(m_lasso)
+coef(m_lambda)
+
+set.seed(1111)
+
+m <- cv.glmnet(x = Reg_train, y = df_impute_v3_bin_train$Listening_Time_minutes,
+               family = 'gaussian', alpha = 0.5)
+plot(m)
+
+m$lambda.min
+m$lambda.1se
+
+m_min <- glmnet(x = Reg_train, y = df_impute_v3_bin_train$Listening_Time_minutes,
+                family = 'gaussian', lambda = m$lambda.min, alpha = 0.5)
+
+m_min$beta
+
+m_1se <- glmnet(x = Reg_train, y = df_impute_v3_bin_train$Listening_Time_minutes,
+             family = 'gaussian', lambda = m$lambda.1se, alpha = 0.5) 
+
+m_1se$beta
+
+Reg_test <- model.matrix(Listening_Time_minutes ~ . - Listening_Time_minutes_bc,
+                         data = df_impute_v3_bin_test)
+
+RMSE(predict(m_min, newx = Reg_test), df_impute_v3_bin_test$Listening_Time_minutes)
+RMSE(predict(m_1se, newx = Reg_test), df_impute_v3_bin_test$Listening_Time_minutes)
+
+################################################################################
 ################################################################################
 
 #XGBoost
@@ -375,20 +511,27 @@ ggplot(data.frame(xgb_y_pred, xgb_residuals), aes(x=xgb_y_pred,
   geom_hline(yintercept = 0, color = 'red') +
   labs(title = 'Residual vs Fitted', x = 'Fitted', y = 'Residuals')
 
-################################################################################
+#Log transformed target
+
+xgb_tuned_log <- train(log1p(Listening_Time_minutes) ~ ., data = df_impute_v3_train,
+                   method = 'xgbTree', trControl = xgb_ctrl,
+                   tuneGrid = xgb_grid)
 
 
+imp <- varImp(xgb_tuned_log)
 
+top5 <- imp$importance %>%
+  rownames_to_column("Variable") %>%
+  arrange(desc(Overall)) %>%
+  slice_head(n=5)
 
-
-
-
-
-
-
-
-
-
+ggplot(top5, aes(x = reorder(Variable, Overall), y = Overall)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 5 Important Variables",
+       x = "Variable",
+       y = "Importance (Overall)") +
+  theme_minimal()
 
 
 
