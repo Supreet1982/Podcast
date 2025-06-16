@@ -358,6 +358,8 @@ Reg_test <- model.matrix(Listening_Time_minutes ~ . - Listening_Time_minutes_bc,
 
 RMSE(predict(m_min, newx = Reg_test), df_impute_v3_bin_test$Listening_Time_minutes)
 RMSE(predict(m_1se, newx = Reg_test), df_impute_v3_bin_test$Listening_Time_minutes)
+RMSE(predict(m_ridge, newx = Reg_test), df_impute_v3_bin_test$Listening_Time_minutes)
+RMSE(predict(m_lasso, newx = Reg_test), df_impute_v3_bin_test$Listening_Time_minutes)
 
 ################################################################################
 ################################################################################
@@ -532,6 +534,64 @@ ggplot(top5, aes(x = reorder(Variable, Overall), y = Overall)) +
        x = "Variable",
        y = "Importance (Overall)") +
   theme_minimal()
+
+shap.plot.summary(data_long = shap_long_small)
+
+
+
+rmse_data <- data.frame(
+  Model = c(
+    "Linear Regression (Full)",
+    "Box-Cox Transformed",
+    "Stepwise AIC",
+    "Stepwise BIC",
+    "Ridge Regression",
+    "Lasso Regression",
+    "Elastic Net (λ.min)",
+    "XGBoost"
+  ),
+  RMSE = c(
+    10.22638,
+    10.40447,
+    10.22638,
+    10.22708,
+    12.24826,
+    14.48427,
+    10.22876,
+    9.870905
+  )
+)
+
+# Reorder models by RMSE for clear visualization
+rmse_data <- rmse_data %>%
+  arrange(RMSE) %>%
+  mutate(Model = factor(Model, levels = Model))
+
+# Create the plot
+ggplot(rmse_data, aes(x = RMSE, y = Model)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = round(RMSE, 3)), hjust = -0.1, size = 3.5) +
+  labs(
+    title = "RMSE Comparison Between Models",
+    x = "Root Mean Squared Error (RMSE)",
+    y = "Model"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text = element_text(size = 10)
+  ) +
+  xlim(0, max(rmse_data$RMSE) + 1)
+
+
+
+
+
+
+
+
+
+
 
 
 
